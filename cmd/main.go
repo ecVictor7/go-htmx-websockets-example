@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"time"
+
+	"github.com/ecVictor7/go-htmx-websockets-example/internal/hardware"
 )
 
 func main() {
