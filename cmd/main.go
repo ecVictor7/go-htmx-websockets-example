@@ -21,6 +21,11 @@ func main() {
 				fmt.Println(err)
 			}
 
+			cpuSection, err := hardware.GetCpuSection()
+			if err != nil {
+				fmt.Println(err)
+			}
+
 			fmt.Println(systemSection)
 			fmt.Println(diskSection)
 			fmt.Println(cpuSection)
