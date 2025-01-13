@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/ecVictor7/go-htmx-websockets-example/internal/hardware"
-	"golang.org/x/net/websocket"
+	//"golang.org/x/net/websocket"
+	"github.com/coder/websocket"
 )
 
 type server struct {
@@ -77,33 +78,46 @@ func (s *server) subscribe(ctx context.Context, writer http.ResponseWriter, req 
 	}
 }
 
+func (s *server) broadcast(msg []byte) {
+	s.subscribersMutex.Lock()
+	for subscriber := range s.subscribers {
+		subscriber.msgs <- msg
+	}
+	s.subscribersMutex.Unlock()
+}
+
 func main() {
 	fmt.Println("Starting my System monitor...")
-	go func() {
+	srv := NewServer()
+	go func(s *server) {
 		for {
-			systemSection, err := hardware.GetSystemSection()
+			_, err := hardware.GetSystemSection()
 			if err != nil {
 				fmt.Println(err)
 			}
 
-			diskSection, err := hardware.GetDiskSection()
-			if err != nil {
-				fmt.Println(err)
-			}
+			//diskSection, err := hardware.GetDiskSection()
+			//if err != nil {
+			//	fmt.Println(err)
+			//}
 
-			cpuSection, err := hardware.GetCpuSection()
-			if err != nil {
-				fmt.Println(err)
-			}
+			//cpuSection, err := hardware.GetCpuSection()
+			//if err != nil {
+			//	fmt.Println(err)
+			//}
 
-			fmt.Println(systemSection)
-			fmt.Println(diskSection)
-			fmt.Println(cpuSection)
+			timeStamp := time.Now().Format("2006-1-02 15:04:05")
+
+			html := `
+			<div hx-swap-oob="innerHTML:#update-timestamp"> ` + timeStamp + `</div>
+			`
+
+			s.broadcast([]byte(html))
 
 			time.Sleep(3 * time.Second)
 		}
-	}()
-	srv := NewServer()
+	}(srv)
+
 	err := http.ListenAndServe(":8080", &srv.mux)
 	if err != nil {
 		fmt.Println(err)
