@@ -16,7 +16,7 @@ import (
 type server struct {
 	subscriberMessageBuffer int
 	mux                     http.ServeMux
-	subscribersMutex        sync.Mutex
+	subscribersMu           sync.Mutex
 	subscribers             map[*subscriber]struct{}
 }
 
@@ -34,8 +34,8 @@ func NewServer() *server {
 	return s
 }
 
-func (s *server) subscribeHandler(writer http.ResponseWriter, req *http.Request) {
-	err := s.subscribe(req.Context(), writer, req)
+func (s *server) subscribeHandler(w http.ResponseWriter, r *http.Request) {
+	err := s.subscribe(r.Context(), w, r)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -43,20 +43,20 @@ func (s *server) subscribeHandler(writer http.ResponseWriter, req *http.Request)
 }
 
 func (s *server) addSubscriber(subscriber *subscriber) {
-	s.subscribersMutex.Lock()
+	s.subscribersMu.Lock()
 	s.subscribers[subscriber] = struct{}{}
-	defer s.subscribersMutex.Unlock()
+	defer s.subscribersMu.Unlock()
 	fmt.Println("Added subscriber", subscriber)
 }
 
-func (s *server) subscribe(ctx context.Context, writer http.ResponseWriter, req *http.Request) error {
+func (s *server) subscribe(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 	var c *websocket.Conn
 	subscriber := &subscriber{
 		msgs: make(chan []byte, s.subscriberMessageBuffer),
 	}
 	s.addSubscriber(subscriber)
 
-	c, err := websocket.Accept(writer, req, nil)
+	c, err := websocket.Accept(w, r, nil)
 	if err != nil {
 		return err
 	}
@@ -66,7 +66,7 @@ func (s *server) subscribe(ctx context.Context, writer http.ResponseWriter, req 
 	for {
 		select {
 		case msg := <-subscriber.msgs:
-			ctx, cancel := context.WithTimeout(ctx, time.Second)
+			ctx, cancel := context.WithTimeout(ctx, time.Second*5)
 			defer cancel()
 			err := c.Write(ctx, websocket.MessageText, msg)
 			if err != nil {
@@ -78,47 +78,54 @@ func (s *server) subscribe(ctx context.Context, writer http.ResponseWriter, req 
 	}
 }
 
-func (s *server) broadcast(msg []byte) {
-	s.subscribersMutex.Lock()
-	for subscriber := range s.subscribers {
-		subscriber.msgs <- msg
+func (cs *server) publishMsg(msg []byte) {
+	cs.subscribersMu.Lock()
+	defer cs.subscribersMu.Unlock()
+
+	for s := range cs.subscribers {
+		s.msgs <- msg
 	}
-	s.subscribersMutex.Unlock()
 }
 
 func main() {
 	fmt.Println("Starting my System monitor...")
-	srv := NewServer()
-	go func(s *server) {
+	s := NewServer()
+	go func(srv *server) {
 		for {
-			_, err := hardware.GetSystemSection()
+			systemData, err := hardware.GetSystemSection()
 			if err != nil {
 				fmt.Println(err)
+				continue
 			}
 
-			//diskSection, err := hardware.GetDiskSection()
-			//if err != nil {
-			//	fmt.Println(err)
-			//}
+			diskData, err := hardware.GetDiskSection()
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
 
-			//cpuSection, err := hardware.GetCpuSection()
-			//if err != nil {
-			//	fmt.Println(err)
-			//}
+			cpuData, err := hardware.GetCpuSection()
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
 
-			timeStamp := time.Now().Format("2006-1-02 15:04:05")
+			timeStamp := time.Now().Format("2006-01-02 15:04:05")
 
-			html := `
-			<div hx-swap-oob="innerHTML:#update-timestamp"> ` + timeStamp + `</div>
-			`
+			msg := []byte(`
+      <div hx-swap-oob="innerHTML:#update-timestamp">
+        <p><i style="color: green" class="fa fa-circle"></i> ` + timeStamp + `</p>
+      </div>
+      <div hx-swap-oob="innerHTML:#system-data">` + systemData + `</div>
+      <div hx-swap-oob="innerHTML:#cpu-data">` + cpuData + `</div>
+      <div hx-swap-oob="innerHTML:#disk-data">` + diskData + `</div>`)
 
-			s.broadcast([]byte(html))
-
+			srv.publishMsg(msg)
 			time.Sleep(3 * time.Second)
 		}
-	}(srv)
+	}(s)
 
-	err := http.ListenAndServe(":8080", &srv.mux)
+	err := http.ListenAndServe(":8080", &s.mux)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
